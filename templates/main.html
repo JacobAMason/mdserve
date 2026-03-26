@@ -527,6 +527,21 @@
             background-color: transparent;
             padding: 0;
         }
+        /* Line numbers */
+        body.show-line-numbers pre code {
+            counter-reset: line;
+        }
+        body.show-line-numbers pre code .code-line::before {
+            counter-increment: line;
+            content: counter(line);
+            display: inline-block;
+            width: 3ch;
+            margin-right: 1.5ch;
+            text-align: right;
+            color: var(--blockquote-color);
+            opacity: 0.5;
+            user-select: none;
+        }
         blockquote {
             border-left: 4px solid var(--border-color-light);
             padding-left: 16px;
@@ -754,6 +769,28 @@
             localStorage.removeItem('width-value');
             applyWidth(WIDTH_DEFAULT_MODE, WIDTH_DEFAULT);
             syncWidthUI(WIDTH_DEFAULT_MODE, WIDTH_DEFAULT);
+        }
+
+        // Line numbers
+        function initLineNumbers() {
+            // Wrap lines in spans for CSS counter support
+            document.querySelectorAll('pre > code').forEach(function(code) {
+                var lines = code.innerHTML.split('\n');
+                if (lines[lines.length - 1] === '') lines.pop();
+                code.innerHTML = lines.map(function(line) {
+                    return '<span class="code-line">' + line + '</span>';
+                }).join('\n');
+            });
+
+            var enabled = localStorage.getItem('line-numbers') !== 'false';
+            if (enabled) document.body.classList.add('show-line-numbers');
+            var toggle = document.getElementById('lineNumbersToggle');
+            if (toggle) toggle.checked = enabled;
+        }
+
+        function toggleLineNumbers(checked) {
+            document.body.classList.toggle('show-line-numbers', checked);
+            localStorage.setItem('line-numbers', checked ? 'true' : 'false');
         }
 
         // Mermaid theme management
@@ -1070,6 +1107,7 @@
             initSidebar();
             initContentWidth();
             initFileTree();
+            initLineNumbers();
             initMermaid();
             initCollapsibleHeadings();
             setupLiveReload();
@@ -1193,6 +1231,12 @@
                 <button class="width-mode-btn" id="widthModeBtn" onclick="toggleWidthMode()" title="Click to switch unit">px</button>
                 <button class="width-reset-btn" onclick="resetWidth()" title="Reset to default (900px)">↺</button>
             </div>
+        </div>
+        <div class="width-control">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+                <input type="checkbox" id="lineNumbersToggle" onchange="toggleLineNumbers(this.checked)">
+                Show line numbers in code blocks
+            </label>
         </div>
     </div>
 </div>
