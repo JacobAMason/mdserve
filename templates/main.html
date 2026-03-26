@@ -477,6 +477,46 @@
         .heading-collapsed .heading-toggle {
             transform: translateY(-50%) rotate(0deg);
         }
+
+        /* Mermaid zoom overlay */
+        .mermaid { position: relative; }
+        .mermaid-zoom-btn {
+            position: absolute;
+            top: 0;
+            right: -40px;
+            background: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 6px;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s;
+            font-size: 16px;
+            line-height: 1;
+            color: var(--text-color);
+            z-index: 1;
+        }
+        .mermaid:hover .mermaid-zoom-btn { opacity: 1; }
+        .mermaid-zoom-btn:hover { background: var(--border-color-light); }
+        .mermaid-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            overflow: hidden;
+            backdrop-filter: blur(4px);
+        }
+        .mermaid-overlay.show { display: flex; align-items: center; justify-content: center; }
+        .mermaid-overlay svg {
+            max-width: 90vw;
+            max-height: 90vh;
+            transform-origin: 0 0;
+            background: var(--bg-color);
+            border-radius: 8px;
+            padding: 16px;
+            cursor: grab;
+        }
     </style>
 
     {% if mermaid_enabled %}
@@ -553,6 +593,10 @@
             }
         }
 
+        function renderMermaid() {
+            mermaid.run().then(initMermaidZoom);
+        }
+
         function initMermaid() {
             if (typeof mermaid !== 'undefined') {
                 mermaid.initialize({
@@ -576,9 +620,98 @@
                 // Find and transform mermaid code blocks
                 transformMermaidCodeBlocks();
 
-                // Render all mermaid diagrams
-                mermaid.run();
+                renderMermaid();
             }
+        }
+
+        function initMermaidZoom() {
+            const overlay = document.createElement('div');
+            overlay.className = 'mermaid-overlay';
+            document.body.appendChild(overlay);
+
+            let scale = 1;
+            let panX = 0, panY = 0;
+            let dragging = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
+
+            function updateTransform(svg) {
+                svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
+            }
+
+            function openZoom(svgEl) {
+                const clone = svgEl.cloneNode(true);
+                clone.removeAttribute('style');
+                clone.removeAttribute('width');
+                clone.setAttribute('height', '90vh');
+                scale = 1; panX = 0; panY = 0;
+                updateTransform(clone);
+                overlay.innerHTML = '';
+                overlay.appendChild(clone);
+                overlay.classList.add('show');
+                clone.addEventListener('click', function(e) { e.stopPropagation(); });
+
+                clone.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    dragging = true;
+                    dragStartX = e.clientX; dragStartY = e.clientY;
+                    panStartX = panX; panStartY = panY;
+                    clone.style.cursor = 'grabbing';
+                });
+            }
+
+            function closeZoom() {
+                if (dragging) return;
+                overlay.classList.remove('show');
+                overlay.innerHTML = '';
+                scale = 1; panX = 0; panY = 0;
+            }
+
+            document.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                panX = panStartX + (e.clientX - dragStartX);
+                panY = panStartY + (e.clientY - dragStartY);
+                const svg = overlay.querySelector('svg');
+                if (svg) updateTransform(svg);
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (dragging) {
+                    dragging = false;
+                    const svg = overlay.querySelector('svg');
+                    if (svg) svg.style.cursor = 'grab';
+                }
+            });
+
+            overlay.addEventListener('click', closeZoom);
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closeZoom();
+            });
+
+            overlay.addEventListener('wheel', function(e) {
+                e.preventDefault();
+                const svg = overlay.querySelector('svg');
+                if (!svg) return;
+                const rect = svg.getBoundingClientRect();
+                const oldScale = scale;
+                scale *= e.deltaY < 0 ? 1.15 : 0.87;
+                scale = Math.max(0.1, Math.min(scale, 10));
+                const ratio = scale / oldScale;
+                panX -= (e.clientX - rect.left) * (ratio - 1);
+                panY -= (e.clientY - rect.top) * (ratio - 1);
+                updateTransform(svg);
+            }, { passive: false });
+
+            document.querySelectorAll('.mermaid').forEach(function(el) {
+                var btn = document.createElement('button');
+                btn.className = 'mermaid-zoom-btn';
+                btn.textContent = '🔍';
+                btn.title = 'Zoom diagram';
+                el.appendChild(btn);
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var svg = el.querySelector('svg');
+                    if (svg) openZoom(svg);
+                });
+            });
         }
 
         function transformMermaidCodeBlocks() {
@@ -624,11 +757,10 @@
                     }
                 });
 
-                mermaid.run();
+                renderMermaid();
             }
         }
 
-        // Auto-refresh functionality using WebSocket
         function setupLiveReload() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws`;
