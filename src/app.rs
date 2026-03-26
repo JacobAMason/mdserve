@@ -972,6 +972,8 @@ mod tests {
         assert!(body.contains("openThemeModal"));
         assert!(body.contains("--bg-color"));
         assert!(body.contains("data-theme=\"dark\""));
+        assert!(body.contains(".heading-toggle"));
+        assert!(body.contains("function initCollapsibleHeadings()"));
     }
 
     #[tokio::test]

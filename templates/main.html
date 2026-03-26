@@ -449,6 +449,34 @@
         a { color: var(--link-color); text-decoration: none; }
         a:hover { text-decoration: underline; }
         img { max-width: 100%; height: auto; }
+
+        /* Collapsible headings */
+        h1, h2, h3, h4, h5, h6 {
+            position: relative;
+        }
+        .heading-toggle {
+            position: absolute;
+            left: -1.5em;
+            top: 50%;
+            transform: translateY(-50%) rotate(90deg);
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.15s, transform 0.15s;
+            font-size: 0.55em;
+            color: var(--blockquote-color);
+            user-select: none;
+            line-height: 1;
+        }
+        h1:hover .heading-toggle, h2:hover .heading-toggle,
+        h3:hover .heading-toggle, h4:hover .heading-toggle,
+        h5:hover .heading-toggle, h6:hover .heading-toggle,
+        .heading-toggle:hover,
+        .heading-collapsed .heading-toggle {
+            opacity: 1;
+        }
+        .heading-collapsed .heading-toggle {
+            transform: translateY(-50%) rotate(0deg);
+        }
     </style>
 
     {% if mermaid_enabled %}
@@ -633,11 +661,48 @@
             };
         }
 
+        // Collapsible headings
+        function initCollapsibleHeadings() {
+            const content = document.getElementById('content');
+            if (!content) return;
+
+            const headingTags = ['H1','H2','H3','H4','H5','H6'];
+
+            function headingLevel(el) {
+                return parseInt(el.tagName[1]);
+            }
+
+            content.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(function(heading) {
+                const toggle = document.createElement('span');
+                toggle.className = 'heading-toggle';
+                toggle.textContent = '▶';
+                toggle.setAttribute('role', 'button');
+                toggle.setAttribute('aria-label', 'Toggle section');
+                heading.prepend(toggle);
+
+                toggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const level = headingLevel(heading);
+                    const collapsed = heading.classList.toggle('heading-collapsed');
+
+                    let sibling = heading.nextElementSibling;
+                    while (sibling) {
+                        if (headingTags.includes(sibling.tagName) && headingLevel(sibling) <= level) {
+                            break;
+                        }
+                        sibling.style.display = collapsed ? 'none' : '';
+                        sibling = sibling.nextElementSibling;
+                    }
+                });
+            });
+        }
+
         // Initialize theme and live reload on page load
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
             initSidebar();
             initMermaid();
+            initCollapsibleHeadings();
             setupLiveReload();
 
             // Modal close functionality
