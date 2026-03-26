@@ -185,6 +185,43 @@
             margin-bottom: 4px;
         }
 
+        .file-list .folder-toggle {
+            display: block;
+            padding: 8px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            color: var(--text-color);
+            border-radius: 6px;
+        }
+
+        .file-list .folder-toggle:hover {
+            background: var(--border-color-light);
+        }
+
+        .file-list .folder-toggle::before {
+            content: '▸';
+            display: inline-block;
+            width: 1em;
+            margin-left: -1em;
+            text-align: center;
+        }
+
+        .file-list li:not(.folder-collapsed) > .folder-toggle::before {
+            content: '▾';
+        }
+
+        .file-list .folder-collapsed > ul {
+            display: none;
+        }
+
+        .file-list ul {
+            list-style: none;
+            padding-left: 12px;
+            margin: 0;
+        }
+
         .file-list a {
             display: block;
             padding: 8px 12px;
@@ -969,11 +1006,70 @@
             });
         }
 
+        function initFileTree() {
+            var list = document.querySelector('.file-list');
+            if (!list) return;
+
+            var links = list.querySelectorAll('a');
+            if (!links.length) return;
+
+            // Check if any file has a directory component
+            var hasSubdirs = false;
+            links.forEach(function(a) {
+                if (a.getAttribute('href').slice(1).indexOf('/') !== -1) hasSubdirs = true;
+            });
+            if (!hasSubdirs) return;
+
+            // Build tree: { files: [...], dirs: { name: { files: [...], dirs: {...} } } }
+            var tree = { files: [], dirs: {} };
+            links.forEach(function(a) {
+                var path = a.getAttribute('href').slice(1); // strip leading /
+                var parts = path.split('/');
+                var node = tree;
+                for (var i = 0; i < parts.length - 1; i++) {
+                    if (!node.dirs[parts[i]]) node.dirs[parts[i]] = { files: [], dirs: {} };
+                    node = node.dirs[parts[i]];
+                }
+                node.files.push(a);
+            });
+
+            function buildList(node) {
+                var ul = document.createElement('ul');
+                // Render directories first
+                Object.keys(node.dirs).sort().forEach(function(dir) {
+                    var li = document.createElement('li');
+                    li.classList.add('folder-collapsed');
+                    var toggle = document.createElement('span');
+                    toggle.className = 'folder-toggle';
+                    toggle.textContent = dir;
+                    toggle.addEventListener('click', function() {
+                        li.classList.toggle('folder-collapsed');
+                    });
+                    li.appendChild(toggle);
+                    li.appendChild(buildList(node.dirs[dir]));
+                    ul.appendChild(li);
+                });
+                // Then files
+                node.files.forEach(function(a) {
+                    var li = document.createElement('li');
+                    a.textContent = a.getAttribute('href').split('/').pop();
+                    li.appendChild(a);
+                    ul.appendChild(li);
+                });
+                return ul;
+            }
+
+            var newList = buildList(tree);
+            newList.className = 'file-list';
+            list.parentNode.replaceChild(newList, list);
+        }
+
         // Initialize theme and live reload on page load
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
             initSidebar();
             initContentWidth();
+            initFileTree();
             initMermaid();
             initCollapsibleHeadings();
             setupLiveReload();

@@ -49,20 +49,30 @@ enum ServerMessage {
     Reload,
 }
 
-pub(crate) fn scan_markdown_files(dir: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn scan_markdown_files(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
     let mut md_files = Vec::new();
 
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-
-        if path.is_file() && is_markdown_file(&path) {
-            md_files.push(path);
+    if recursive {
+        for entry in walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path().to_path_buf();
+            if path.is_file() && is_markdown_file(&path) {
+                md_files.push(path);
+            }
+        }
+    } else {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() && is_markdown_file(&path) {
+                md_files.push(path);
+            }
         }
     }
 
     md_files.sort();
-
     Ok(md_files)
 }
 
@@ -97,7 +107,11 @@ impl MarkdownState {
             let content = fs::read_to_string(&file_path)?;
             let html = Self::markdown_to_html(&content)?;
 
-            let filename = file_path.file_name().unwrap().to_string_lossy().to_string();
+            let filename = file_path
+                .strip_prefix(&base_dir)
+                .unwrap_or(&file_path)
+                .to_string_lossy()
+                .to_string();
 
             tracked_files.insert(
                 filename,
@@ -147,7 +161,11 @@ impl MarkdownState {
     }
 
     fn add_tracked_file(&mut self, file_path: PathBuf) -> Result<()> {
-        let filename = file_path.file_name().unwrap().to_string_lossy().to_string();
+        let filename = file_path
+            .strip_prefix(&self.base_dir)
+            .unwrap_or(&file_path)
+            .to_string_lossy()
+            .to_string();
 
         if self.tracked_files.contains_key(&filename) {
             return Ok(());
@@ -187,12 +205,13 @@ async fn handle_markdown_file_change(path: &Path, state: &SharedMarkdownState) {
         return;
     }
 
-    let filename = path.file_name().and_then(|n| n.to_str()).map(String::from);
-    let Some(filename) = filename else {
-        return;
-    };
-
     let mut state_guard = state.lock().await;
+
+    let filename = path
+        .strip_prefix(&state_guard.base_dir)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
 
     // If file is already tracked, refresh its content
     if state_guard.tracked_files.contains_key(&filename) {
@@ -279,6 +298,16 @@ fn new_router(
 ) -> Result<Router> {
     let base_dir = base_dir.canonicalize()?;
 
+    let watch_mode = if is_directory_mode
+        && tracked_files.iter().any(|p| {
+            p.strip_prefix(&base_dir)
+                .is_ok_and(|r| r.components().count() > 1)
+        }) {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    };
+
     let state = Arc::new(Mutex::new(MarkdownState::new(
         base_dir.clone(),
         tracked_files,
@@ -297,7 +326,7 @@ fn new_router(
         Config::default(),
     )?;
 
-    watcher.watch(&base_dir, RecursiveMode::NonRecursive)?;
+    watcher.watch(&base_dir, watch_mode)?;
 
     tokio::spawn(async move {
         let _watcher = watcher;
@@ -767,7 +796,7 @@ mod tests {
     fn test_scan_markdown_files_empty_directory() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
 
-        let result = scan_markdown_files(temp_dir.path()).expect("Failed to scan");
+        let result = scan_markdown_files(temp_dir.path(), false).expect("Failed to scan");
         assert_eq!(result.len(), 0);
     }
 
@@ -782,7 +811,7 @@ mod tests {
         fs::write(temp_dir.path().join("test.txt"), "text").expect("Failed to write");
         fs::write(temp_dir.path().join("README"), "readme").expect("Failed to write");
 
-        let result = scan_markdown_files(temp_dir.path()).expect("Failed to scan");
+        let result = scan_markdown_files(temp_dir.path(), false).expect("Failed to scan");
 
         assert_eq!(result.len(), 3);
 
@@ -803,7 +832,7 @@ mod tests {
         fs::create_dir(&sub_dir).expect("Failed to create subdir");
         fs::write(sub_dir.join("nested.md"), "# Nested").expect("Failed to write");
 
-        let result = scan_markdown_files(temp_dir.path()).expect("Failed to scan");
+        let result = scan_markdown_files(temp_dir.path(), false).expect("Failed to scan");
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].file_name().unwrap().to_str().unwrap(), "root.md");
@@ -818,7 +847,7 @@ mod tests {
         fs::write(temp_dir.path().join("test3.Md"), "# Test 3").expect("Failed to write");
         fs::write(temp_dir.path().join("test4.MARKDOWN"), "# Test 4").expect("Failed to write");
 
-        let result = scan_markdown_files(temp_dir.path()).expect("Failed to scan");
+        let result = scan_markdown_files(temp_dir.path(), false).expect("Failed to scan");
 
         assert_eq!(result.len(), 4);
     }
@@ -930,7 +959,8 @@ mod tests {
             .expect("Failed to write test3.md");
 
         let base_dir = temp_dir.path().to_path_buf();
-        let tracked_files = scan_markdown_files(&base_dir).expect("Failed to scan markdown files");
+        let tracked_files =
+            scan_markdown_files(&base_dir, false).expect("Failed to scan markdown files");
         let is_directory_mode = true;
 
         let router = new_router(base_dir, tracked_files, is_directory_mode)
