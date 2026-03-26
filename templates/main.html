@@ -574,6 +574,28 @@
         a:hover { text-decoration: underline; }
         img { max-width: 100%; height: auto; }
 
+        /* Source line numbers */
+        [data-line] {
+            position: relative;
+        }
+        [data-line]::before {
+            content: attr(data-line);
+            position: absolute;
+            left: -4em;
+            width: 3.5em;
+            text-align: right;
+            font-size: 12px;
+            line-height: inherit;
+            color: var(--blockquote-color);
+            opacity: 0;
+            user-select: none;
+            pointer-events: none;
+            transition: opacity 0.15s;
+        }
+        body.show-source-lines [data-line]::before {
+            opacity: 0.4;
+        }
+
         /* Collapsible headings */
         h1, h2, h3, h4, h5, h6 {
             position: relative;
@@ -786,11 +808,21 @@
             if (enabled) document.body.classList.add('show-line-numbers');
             var toggle = document.getElementById('lineNumbersToggle');
             if (toggle) toggle.checked = enabled;
+
+            var sourceEnabled = localStorage.getItem('source-lines') === 'true';
+            if (sourceEnabled) document.body.classList.add('show-source-lines');
+            var sourceToggle = document.getElementById('sourceLineToggle');
+            if (sourceToggle) sourceToggle.checked = sourceEnabled;
         }
 
         function toggleLineNumbers(checked) {
             document.body.classList.toggle('show-line-numbers', checked);
             localStorage.setItem('line-numbers', checked ? 'true' : 'false');
+        }
+
+        function toggleSourceLines(checked) {
+            document.body.classList.toggle('show-source-lines', checked);
+            localStorage.setItem('source-lines', checked ? 'true' : 'false');
         }
 
         // Mermaid theme management
@@ -1236,6 +1268,10 @@
             <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
                 <input type="checkbox" id="lineNumbersToggle" onchange="toggleLineNumbers(this.checked)">
                 Show line numbers in code blocks
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;margin-top:8px">
+                <input type="checkbox" id="sourceLineToggle" onchange="toggleSourceLines(this.checked)">
+                Show source line numbers
             </label>
         </div>
     </div>

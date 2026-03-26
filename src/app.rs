@@ -15,6 +15,7 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fmt::Write,
     fs,
     net::{Ipv4Addr, Ipv6Addr},
     path::{Path, PathBuf},
@@ -194,7 +195,151 @@ impl MarkdownState {
         let html_body = markdown::to_html_with_options(content, &options)
             .unwrap_or_else(|_| "Error parsing markdown".to_string());
 
-        Ok(html_body)
+        // Extract source line numbers from AST
+        let line_numbers = Self::extract_block_line_numbers(content);
+
+        if line_numbers.is_empty() {
+            return Ok(html_body);
+        }
+
+        Ok(Self::inject_line_attributes(&html_body, &line_numbers))
+    }
+
+    /// Parse markdown to AST and collect the starting line number of each
+    /// top-level block element (skipping frontmatter).
+    fn extract_block_line_numbers(content: &str) -> Vec<usize> {
+        let mut parse_opts = markdown::ParseOptions::gfm();
+        parse_opts.constructs.frontmatter = true;
+
+        let ast = match markdown::to_mdast(content, &parse_opts) {
+            Ok(node) => node,
+            Err(_) => return Vec::new(),
+        };
+
+        let children = match &ast {
+            markdown::mdast::Node::Root(root) => &root.children,
+            _ => return Vec::new(),
+        };
+
+        children
+            .iter()
+            .filter_map(|node| {
+                // Skip frontmatter nodes
+                match node {
+                    markdown::mdast::Node::Yaml(_) | markdown::mdast::Node::Toml(_) => None,
+                    _ => node.position().map(|pos| pos.start.line),
+                }
+            })
+            .collect()
+    }
+
+    /// Inject `data-line="N"` attributes into top-level block element
+    /// opening tags in the HTML string.
+    fn inject_line_attributes(html: &str, line_numbers: &[usize]) -> String {
+        const BLOCK_TAGS: &[&str] = &[
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "pre",
+            "ul",
+            "ol",
+            "blockquote",
+            "table",
+            "hr",
+            "div",
+            "dl",
+        ];
+
+        let mut result = String::with_capacity(html.len() + line_numbers.len() * 20);
+        let mut line_idx = 0;
+        let mut depth: i32 = 0;
+        let bytes = html.as_bytes();
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i] == b'<' {
+                // Check for closing tag
+                if i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    // Find tag name
+                    let tag_start = i + 2;
+                    let tag_end = html[tag_start..]
+                        .find(|c: char| c == '>' || c.is_whitespace())
+                        .map(|p| tag_start + p)
+                        .unwrap_or(bytes.len());
+                    let tag_name = &html[tag_start..tag_end];
+
+                    if BLOCK_TAGS.iter().any(|t| t.eq_ignore_ascii_case(tag_name)) && depth > 0 {
+                        depth -= 1;
+                    }
+
+                    let close = html[i..]
+                        .find('>')
+                        .map(|p| i + p + 1)
+                        .unwrap_or(bytes.len());
+                    result.push_str(&html[i..close]);
+                    i = close;
+                    continue;
+                }
+
+                // Opening tag
+                let tag_start = i + 1;
+                let tag_end = html[tag_start..]
+                    .find(|c: char| c == '>' || c == '/' || c.is_whitespace())
+                    .map(|p| tag_start + p)
+                    .unwrap_or(bytes.len());
+                let tag_name = &html[tag_start..tag_end];
+
+                let is_block = BLOCK_TAGS.iter().any(|t| t.eq_ignore_ascii_case(tag_name));
+
+                if is_block && depth == 0 && line_idx < line_numbers.len() {
+                    // Find end of opening tag name to inject attribute
+                    result.push_str(&html[i..tag_end]);
+                    let _ = write!(result, " data-line=\"{}\"", line_numbers[line_idx]);
+                    line_idx += 1;
+                    i = tag_end;
+
+                    // Self-closing tags like <hr /> don't increase depth
+                    let rest = &html[i..];
+                    if let Some(close_pos) = rest.find('>') {
+                        let tag_content = &rest[..close_pos];
+                        if !tag_content.ends_with('/') {
+                            depth += 1;
+                        }
+                        result.push_str(&rest[..=close_pos]);
+                        i += close_pos + 1;
+                    }
+                    continue;
+                }
+
+                if is_block {
+                    depth += 1;
+                    // Check for self-closing
+                    if let Some(close_pos) = html[i..].find('>') {
+                        let tag_content = &html[i..i + close_pos];
+                        if tag_content.ends_with('/') {
+                            depth -= 1;
+                        }
+                        result.push_str(&html[i..i + close_pos + 1]);
+                        i += close_pos + 1;
+                        continue;
+                    }
+                }
+
+                let ch = html[i..].chars().next().unwrap();
+                result.push(ch);
+                i += ch.len_utf8();
+            } else {
+                let ch = html[i..].chars().next().unwrap();
+                result.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+
+        result
     }
 }
 
@@ -996,7 +1141,7 @@ mod tests {
         assert_eq!(response.status_code(), 200);
         let body = response.text();
 
-        assert!(body.contains("<h1>Hello World</h1>"));
+        assert!(body.contains("Hello World</h1>"));
         assert!(body.contains("<strong>bold</strong>"));
         assert!(body.contains("theme-toggle"));
         assert!(body.contains("openThemeModal"));
@@ -1061,11 +1206,11 @@ fn main() {
         assert_eq!(response.status_code(), 200);
         let body = response.text();
 
-        assert!(body.contains("<table>"));
+        assert!(body.contains("<table "));
         assert!(body.contains("<th>Name</th>"));
         assert!(body.contains("<td>John</td>"));
         assert!(body.contains("<del>deleted text</del>"));
-        assert!(body.contains("<pre>"));
+        assert!(body.contains("<pre "));
         assert!(body.contains("fn main()"));
     }
 
@@ -1158,7 +1303,7 @@ Regular **markdown** still works.
         assert_eq!(response.status_code(), 200);
         let body = response.text();
 
-        assert!(body.contains(r#"<div class="highlight">"#));
+        assert!(body.contains(r#"class="highlight""#));
         assert!(body.contains(r#"<span style="color: red;">"#));
         assert!(body.contains("<p>This should be rendered as HTML, not escaped</p>"));
         assert!(!body.contains("&lt;div"));
@@ -1341,19 +1486,19 @@ classDiagram
         let response1 = server.get("/test1.md").await;
         assert_eq!(response1.status_code(), 200);
         let body1 = response1.text();
-        assert!(body1.contains("<h1>Test 1</h1>"));
+        assert!(body1.contains("Test 1</h1>"));
         assert!(body1.contains("Content of test1"));
 
         let response2 = server.get("/test2.markdown").await;
         assert_eq!(response2.status_code(), 200);
         let body2 = response2.text();
-        assert!(body2.contains("<h1>Test 2</h1>"));
+        assert!(body2.contains("Test 2</h1>"));
         assert!(body2.contains("Content of test2"));
 
         let response3 = server.get("/test3.md").await;
         assert_eq!(response3.status_code(), 200);
         let body3 = response3.text();
-        assert!(body3.contains("<h1>Test 3</h1>"));
+        assert!(body3.contains("Test 3</h1>"));
         assert!(body3.contains("Content of test3"));
     }
 
@@ -1495,7 +1640,7 @@ classDiagram
         let new_file_response = server.get("/test4.md").await;
         assert_eq!(new_file_response.status_code(), 200);
         let new_file_body = new_file_response.text();
-        assert!(new_file_body.contains("<h1>Test 4</h1>"));
+        assert!(new_file_body.contains("Test 4</h1>"));
         assert!(new_file_body.contains("This is a new file"));
     }
 
@@ -1630,7 +1775,7 @@ classDiagram
 
         assert!(!body.contains("title: Test Post"));
         assert!(!body.contains("author: Name"));
-        assert!(body.contains("<h1>Test Post</h1>"));
+        assert!(body.contains("Test Post</h1>"));
     }
 
     #[tokio::test]
@@ -1643,7 +1788,7 @@ classDiagram
         let body = response.text();
 
         assert!(!body.contains("title = \"Test Post\""));
-        assert!(body.contains("<h1>Test Post</h1>"));
+        assert!(body.contains("Test Post</h1>"));
     }
 
     #[tokio::test]
