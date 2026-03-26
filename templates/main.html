@@ -327,6 +327,43 @@
             gap: 16px;
         }
 
+        .width-control {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .width-control h3 {
+            margin: 0 0 12px 0;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        .width-control-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .width-control input[type="range"] {
+            flex: 1;
+        }
+
+        .width-mode-btn, .width-reset-btn {
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--code-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .width-mode-btn:hover, .width-reset-btn:hover {
+            background: var(--border-color-light);
+        }
+
         .theme-card {
             border: 2px solid transparent;
             border-radius: 8px;
@@ -576,6 +613,75 @@
             if (isCollapsed) {
                 document.body.classList.add('sidebar-collapsed');
             }
+        }
+
+        // Content width management
+        const WIDTH_DEFAULT = 900;
+        const WIDTH_DEFAULT_MODE = 'px';
+
+        function initContentWidth() {
+            const mode = localStorage.getItem('width-mode') || WIDTH_DEFAULT_MODE;
+            const value = parseInt(localStorage.getItem('width-value')) || WIDTH_DEFAULT;
+            applyWidth(mode, value);
+            syncWidthUI(mode, value);
+        }
+
+        function applyWidth(mode, value) {
+            const css = mode === '%' ? value + 'vw' : value + 'px';
+            document.documentElement.style.setProperty('--content-max-width', css);
+        }
+
+        function syncWidthUI(mode, value) {
+            const slider = document.getElementById('widthSlider');
+            const number = document.getElementById('widthNumber');
+            const btn = document.getElementById('widthModeBtn');
+            if (!slider) return;
+
+            btn.textContent = mode;
+            if (mode === '%') {
+                slider.min = 30; slider.max = 100; slider.step = 1;
+            } else {
+                slider.min = 400; slider.max = 2400; slider.step = 50;
+            }
+            slider.value = value;
+            number.textContent = value;
+        }
+
+        function toggleWidthMode() {
+            const current = document.getElementById('widthModeBtn').textContent;
+            const currentValue = parseInt(document.getElementById('widthNumber').textContent) || WIDTH_DEFAULT;
+            var mode, value;
+            if (current === 'px') {
+                mode = '%';
+                value = Math.round(currentValue / window.innerWidth * 100);
+                value = Math.max(30, Math.min(100, value));
+            } else {
+                mode = 'px';
+                value = Math.round(currentValue / 100 * window.innerWidth / 50) * 50;
+                value = Math.max(400, Math.min(2400, value));
+            }
+            localStorage.setItem('width-mode', mode);
+            localStorage.setItem('width-value', value);
+            applyWidth(mode, value);
+            syncWidthUI(mode, value);
+        }
+
+        function updateWidth(value) {
+            const mode = document.getElementById('widthModeBtn').textContent;
+            value = parseInt(value);
+            if (isNaN(value)) return;
+            document.getElementById('widthSlider').value = value;
+            document.getElementById('widthNumber').textContent = value;
+            localStorage.setItem('width-mode', mode);
+            localStorage.setItem('width-value', value);
+            applyWidth(mode, value);
+        }
+
+        function resetWidth() {
+            localStorage.removeItem('width-mode');
+            localStorage.removeItem('width-value');
+            applyWidth(WIDTH_DEFAULT_MODE, WIDTH_DEFAULT);
+            syncWidthUI(WIDTH_DEFAULT_MODE, WIDTH_DEFAULT);
         }
 
         // Mermaid theme management
@@ -833,6 +939,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
             initSidebar();
+            initContentWidth();
             initMermaid();
             initCollapsibleHeadings();
             setupLiveReload();
@@ -944,7 +1051,14 @@
                 <div class="theme-card-sample">Classic dark</div>
             </div>
         </div>
+        <div class="width-control">
+            <h3>Content Width</h3>
+            <div class="width-control-row">
+                <input type="range" id="widthSlider" oninput="updateWidth(this.value)">
+                <span id="widthNumber" style="min-width:50px;text-align:right;font-size:14px"></span>
+                <button class="width-mode-btn" id="widthModeBtn" onclick="toggleWidthMode()" title="Click to switch unit">px</button>
+                <button class="width-reset-btn" onclick="resetWidth()" title="Reset to default (900px)">↺</button>
+            </div>
+        </div>
     </div>
 </div>
-</body>
-</html>
