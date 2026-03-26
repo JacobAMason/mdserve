@@ -263,6 +263,41 @@
         }
         {% endif %}
 
+        .connection-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: #e05252;
+            z-index: 3000;
+            opacity: 0;
+            transition: height 0.2s, opacity 0.3s;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .connection-bar.disconnected {
+            opacity: 1;
+            pointer-events: auto;
+            background: linear-gradient(90deg, #e05252 25%, #f08a5d 50%, #e05252 75%);
+            background-size: 200% 100%;
+            animation: connection-bar-slide 1.5s linear infinite;
+        }
+        @keyframes connection-bar-slide {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .connection-bar.disconnected:hover {
+            height: 28px;
+        }
+        .connection-bar-text {
+            font-size: 12px;
+            color: #1a1a1a;
+            text-align: center;
+            line-height: 28px;
+            white-space: nowrap;
+        }
+
         .theme-toggle {
             position: fixed;
             top: 20px;
@@ -868,19 +903,19 @@
         }
 
         function setupLiveReload() {
+            const bar = document.getElementById('connectionBar');
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}/ws`;
             const socket = new WebSocket(wsUrl);
 
             socket.onopen = function(event) {
-                console.log('WebSocket connected');
+                bar.classList.remove('disconnected');
             };
 
             socket.onmessage = function(event) {
                 try {
                     const message = JSON.parse(event.data);
                     if (message.type === 'Reload') {
-                        console.log('Reloading page via WebSocket');
                         window.location.reload();
                     }
                 } catch (error) {
@@ -893,8 +928,7 @@
             };
 
             socket.onclose = function(event) {
-                console.log('WebSocket closed, attempting to reconnect...');
-                // Attempt to reconnect after 3 seconds
+                bar.classList.add('disconnected');
                 setTimeout(setupLiveReload, 3000);
             };
         }
@@ -986,6 +1020,10 @@
     </div>
 </nav>
 {% endif %}
+
+<div class="connection-bar" id="connectionBar">
+    <div class="connection-bar-text">Live reload disconnected — reconnecting…</div>
+</div>
 
 <button class="theme-toggle" onclick="openThemeModal()">🎨</button>
 <div id="content">
